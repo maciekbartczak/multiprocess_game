@@ -30,29 +30,29 @@ int main(void){
 
     pthread_mutex_init(&game_data.mutex,NULL);
 
-    struct player_t player_local = {.in_game = false};
-    game_data.player[0] = &player_local;
-    game_data.player[1] = mmap(NULL,sizeof(struct player_t),PROT_READ | PROT_WRITE, MAP_SHARED,player2_fd,0);
-    game_data.player[1]->in_game = false;
-    initialize_player(game_data.player[0]);
+    struct player_t player_local[2] = {[0].in_game = false, [1].in_game = false};
+    game_data.player = player_local;
+    initialize_player(&game_data.player[0]);
+    game_data.player_remote[0] = &player_local[0]; 
+    game_data.player_remote[1] = mmap(NULL,sizeof(struct player_t),PROT_READ | PROT_WRITE, MAP_SHARED,player2_fd,0);
+    game_data.player_remote[1]->in_game = false;
     game_data.round = 0;
     game_data.campsite = get_empty_tile();
     map[game_data.campsite.y][game_data.campsite.x] = MAP_RESERVED;
     for(int i=0;i<MAX_TREASURES;i++){
         game_data.treasures[i].type = TR_NONE;
     }
-    game_data.player[0]->pid = getpid();
-    game_data.player[0]->server_pid = game_data.player[0]->pid;
-    game_data.player[1]->server_pid = game_data.player[0]->server_pid;
+    game_data.player[0].pid = getpid();
+    game_data.player[0].server_pid = game_data.player[0].pid;
 
-    sem_init(&game_data.player[1]->join_request,1,0);
-    sem_init(&game_data.player[1]->join_reply,1,0);
-    sem_init(&game_data.player[1]->leave_request,1,0);
-    sem_init(&game_data.player[1]->leave_reply,1,0);
-    sem_init(&game_data.player[1]->move_request,1,0);
-    sem_init(&game_data.player[1]->move_reply,1,0);
-    sem_init(&game_data.player[0]->move_request,0,0);
-    sem_init(&game_data.player[0]->move_reply,0,0);
+    sem_init(&game_data.player_remote[1]->join_request,1,0);
+    sem_init(&game_data.player_remote[1]->join_reply,1,0);
+    sem_init(&game_data.player_remote[1]->leave_request,1,0);
+    sem_init(&game_data.player_remote[1]->leave_reply,1,0);
+    sem_init(&game_data.player_remote[1]->move_request,1,0);
+    sem_init(&game_data.player_remote[1]->move_reply,1,0);
+    sem_init(&game_data.player_remote[0]->move_request,0,0);
+    sem_init(&game_data.player_remote[0]->move_reply,0,0);
     sem_init(&game_data.round_up,0,0);
 
     pthread_t th_map,th_keyboard,th_join,th_leave,th_round;
@@ -69,15 +69,15 @@ int main(void){
     shm_unlink("player");
     close(player2_fd);
 
-    sem_destroy(&game_data.player[1]->join_request);
-    sem_destroy(&game_data.player[1]->leave_request);
-    sem_destroy(&game_data.player[1]->join_reply);
-    sem_destroy(&game_data.player[1]->leave_request);
-    sem_destroy(&game_data.player[1]->leave_reply);
-    sem_destroy(&game_data.player[1]->move_request);
-    sem_destroy(&game_data.player[1]->move_reply);
-    sem_destroy(&game_data.player[0]->move_request);
-    sem_destroy(&game_data.player[0]->move_reply);
+    sem_destroy(&game_data.player_remote[0]->join_request);
+    sem_destroy(&game_data.player_remote[0]->leave_request);
+    sem_destroy(&game_data.player_remote[0]->join_reply);
+    sem_destroy(&game_data.player_remote[0]->leave_request);
+    sem_destroy(&game_data.player_remote[0]->leave_reply);
+    sem_destroy(&game_data.player_remote[0]->move_request);
+    sem_destroy(&game_data.player_remote[0]->move_reply);
+    sem_destroy(&game_data.player_remote[1]->move_request);
+    sem_destroy(&game_data.player_remote[1]->move_reply);
     sem_destroy(&game_data.round_up);
     endwin();
     return 0;
@@ -156,9 +156,9 @@ void *print_map(__attribute__((unused)) void *arg) {
         }
 
         for(int i=0;i<2;i++){
-            if(game_data.player[i]->in_game){
+            if(game_data.player[i].in_game){
                 attron(COLOR_PAIR(PLAYER_PAIR));
-                mvprintw(game_data.player[i]->position.y,game_data.player[i]->position.x,"%d",i+1);
+                mvprintw(game_data.player[i].position.y,game_data.player[i].position.x,"%d",i+1);
                 attroff(COLOR_PAIR(PLAYER_PAIR));
             }   
             
@@ -168,10 +168,9 @@ void *print_map(__attribute__((unused)) void *arg) {
         mvprintw(game_data.campsite.y,game_data.campsite.x,"A");
         attroff(COLOR_PAIR(CAMPSITE_PAIR));
 
-        mvprintw(0,MAP_COLUMNS + 2,"Server PID: %d",game_data.player[0]->server_pid);
+        mvprintw(0,MAP_COLUMNS + 2,"Server PID: %d",game_data.player[0].server_pid);
         mvprintw(1,MAP_COLUMNS + 4,"Campsite X\\Y %d\\%d",game_data.campsite.x,game_data.campsite.y);
         mvprintw(2,MAP_COLUMNS + 4,"Round number: %d",game_data.round);
-        //TODO: print player stats when structs are ready
         mvprintw(5,MAP_COLUMNS + 2,"Parameter:   Player1  Player2");
         mvprintw(6,MAP_COLUMNS + 4,"PID");
         mvprintw(7,MAP_COLUMNS + 4,"Type");
@@ -181,14 +180,14 @@ void *print_map(__attribute__((unused)) void *arg) {
         mvprintw(12,MAP_COLUMNS + 4,"Carried");
         mvprintw(13,MAP_COLUMNS + 4,"Brought");
         for(int i = 0;i < 2; i++){
-            if(game_data.player[i]->in_game){
-                mvprintw(6,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player[i]->pid);
+            if(game_data.player[i].in_game){
+                mvprintw(6,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player_remote[i]->pid);
                 mvprintw(7,MAP_COLUMNS + 4 + 11 +(i * 9),"HUMAN");
                 mvprintw(8,MAP_COLUMNS + 4 + 11 +(i * 9),"%d\\%d",
-                         game_data.player[i]->position.x, game_data.player[i]->position.y);
-                mvprintw(9,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player[i]->deaths);
-                mvprintw(12,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player[i]->coins_carried);
-                mvprintw(13,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player[i]->coins_brought);
+                         game_data.player[i].position.x, game_data.player[i].position.y);
+                mvprintw(9,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player[i].deaths);
+                mvprintw(12,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player[i].coins_carried);
+                mvprintw(13,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player[i].coins_brought);
             }else{
                 mvprintw(6,MAP_COLUMNS + 4 + 11 +(i * 9),"-      ");
                 mvprintw(7,MAP_COLUMNS + 4 + 11 +(i * 9),"-      ");
@@ -242,9 +241,9 @@ point get_empty_tile(){
             valid = true;
         }
         for(int i=0;i<2;i++){
-                if(game_data.player[i] != NULL && game_data.player[i]->in_game){
-                    if(p.x == game_data.player[i]->position.x && 
-                       p.y == game_data.player[i]->position.y){
+                if(game_data.player[i].in_game){
+                    if(p.x == game_data.player[i].position.x && 
+                       p.y == game_data.player[i].position.y){
                            valid = false;
                     }
             }
@@ -260,7 +259,7 @@ void *keyboard_event(__attribute__((unused)) void *arg){
     int k;
     while(1){
         bool move = false;
-        k = getch();
+        k = getchar();
         switch(k){
             case 'c':
             add_treasure(k,1);
@@ -274,27 +273,27 @@ void *keyboard_event(__attribute__((unused)) void *arg){
             case 'q':
                 return NULL;
             case 'w':
-                game_data.player[0]->move = PM_UP;
+                game_data.player_remote[0]->move = PM_UP;
                 move = true;
                 break;
             case 's':
-                game_data.player[0]->move = PM_DOWN;
+                game_data.player_remote[0]->move = PM_DOWN;
                 move = true;
                 break;
             case 'a':
-                game_data.player[0]->move = PM_LEFT;
+                game_data.player_remote[0]->move = PM_LEFT;
                 move = true;
                 break;
             case 'd':
-                game_data.player[0]->move = PM_RIGHT;
+                game_data.player_remote[0]->move = PM_RIGHT;
                 move = true;
                 break;
             default:
                 break;
         }
         if(move){
-            sem_post(&game_data.player[0]->move_request);
-            sem_wait(&game_data.player[0]->move_reply);
+            sem_post(&game_data.player_remote[0]->move_request);
+            sem_wait(&game_data.player_remote[0]->move_reply);
         }
     }
 }
@@ -330,25 +329,32 @@ void initialize_player(struct player_t *p){
 
 void *player_join(void *arg){
     while(1){
-        sem_wait(&game_data.player[1]->join_request);
+        sem_wait(&game_data.player_remote[1]->join_request);
         pthread_mutex_lock(&game_data.mutex);
-        if(!game_data.player[1]->in_game){
-            initialize_player(game_data.player[1]);
+        if(!game_data.player[1].in_game){
+            initialize_player(&game_data.player[1]);
+            game_data.player_remote[1]->position = game_data.player[1].position;
+            game_data.player_remote[1]->in_game = game_data.player[1].in_game;
+            game_data.player_remote[1]->deaths = game_data.player[1].deaths;
+            game_data.player_remote[1]->coins_carried = game_data.player[1].coins_carried;
+            game_data.player_remote[1]->coins_brought = game_data.player[1].coins_brought;
+            game_data.player_remote[1]->server_pid = game_data.player[0].server_pid;
         }
-        sem_post(&game_data.player[1]->join_reply);
+        sem_post(&game_data.player_remote[1]->join_reply);
         pthread_mutex_unlock(&game_data.mutex);
     }
 }
 
 void *player_leave(void *arg){
     while(1){
-        sem_wait(&game_data.player[1]->leave_request);
+        sem_wait(&game_data.player_remote[1]->leave_request);
         pthread_mutex_lock(&game_data.mutex);
-        if(game_data.player[1]->in_game){
-            game_data.player[1]->in_game = false;
-            map[game_data.player[1]->position.y][game_data.player[1]->position.x] = MAP_EMPTY;
+        if(game_data.player[1].in_game){
+            game_data.player[1].in_game = false;
+            map[game_data.player[1].position.y][game_data.player[1].position.x] = MAP_EMPTY;
+            game_data.player_remote[1]->in_game = false;
         }
-        sem_post(&game_data.player[1]->leave_reply);
+        sem_post(&game_data.player_remote[1]->leave_reply);
         pthread_mutex_unlock(&game_data.mutex);
     }
 }
@@ -356,14 +362,14 @@ void *player_leave(void *arg){
 void *advance_round(void *arg){
     while(1){
         for(int i=0;i<2;i++){
-            if(game_data.player[i]->in_game){
-                if(game_data.player[i]->slowed){ //skip a turn
-                    game_data.player[i]->slowed = false;
+            if(game_data.player[i].in_game){
+                if(game_data.player[i].slowed){ //skip a turn
+                    game_data.player[i].slowed = false;
                     continue;
                 }
-                if(sem_trywait(&game_data.player[i]->move_request) == 0){
-                    point pos = game_data.player[i]->position;
-                    switch(game_data.player[i]->move){
+                if(sem_trywait(&game_data.player_remote[i]->move_request) == 0){
+                    point pos = game_data.player[i].position;
+                    switch(game_data.player_remote[i]->move){
                         case PM_UP:
                             pos.y--;
                             break;
@@ -378,30 +384,37 @@ void *advance_round(void *arg){
                             break;     
                     }
                     if(map[pos.y][pos.x] != MAP_WALL){
-                        game_data.player[i]->position = pos;
+                        game_data.player[i].position = pos;
                     }
                     if(map[pos.y][pos.x] == MAP_BUSH){
-                        game_data.player[i]->slowed = true;
+                        game_data.player[i].slowed = true;
                     }
                     if(game_data.campsite.x == pos.x && game_data.campsite.y == pos.y){
-                        game_data.player[i]->coins_brought += game_data.player[i]->coins_carried;
-                        game_data.player[i]->coins_carried = 0;
+                        game_data.player[i].coins_brought += game_data.player[i].coins_carried;
+                        game_data.player[i].coins_carried = 0;
                     }
                     for(int j=0;j<MAX_TREASURES;j++){
                         if(game_data.treasures[j].type != TR_NONE &&
                         game_data.treasures[j].position.x == pos.x &&
                         game_data.treasures[j].position.y == pos.y){
                             map[game_data.treasures[j].position.y][game_data.treasures[j].position.x] = MAP_EMPTY;
-                            game_data.player[i]->coins_carried += game_data.treasures[j].coins;
+                            game_data.player[i].coins_carried += game_data.treasures[j].coins;
                             game_data.treasures[j].type = TR_NONE;
                             break;
                         }
                     }
-                    sem_post(&game_data.player[i]->move_reply);
+                    sem_post(&game_data.player_remote[i]->move_reply);
                 }
+            }
+            if(i==1){
+                game_data.player_remote[i]->position = game_data.player[i].position;
+                game_data.player_remote[i]->deaths = game_data.player[i].deaths;
+                game_data.player_remote[i]->coins_carried = game_data.player[i].coins_carried;
+                game_data.player_remote[i]->coins_brought = game_data.player[i].coins_brought;
             }
             
         }
+        
         usleep(250 * MS);
         game_data.round++;
         sem_post(&game_data.round_up);

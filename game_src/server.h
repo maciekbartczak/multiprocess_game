@@ -48,8 +48,8 @@ struct game_data_t{
     point campsite;
     unsigned int round;
     struct treasure_t treasures[MAX_TREASURES];
-    struct player_t *player[2];
-    struct player_t *player_remote;
+    struct player_t *player;
+    struct player_t *player_remote[2];
     sem_t round_up;
 };
 

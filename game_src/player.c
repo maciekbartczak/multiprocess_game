@@ -21,7 +21,7 @@ int main(void){
         return 0;
     }
     p_data = mmap(NULL,sizeof(struct player_t),PROT_READ | PROT_WRITE, MAP_SHARED,my_fd,0);
-        
+            
     if(!p_data->in_game){
         pid_t my_pid = getpid();
         sem_post(&p_data->join_request);
@@ -74,6 +74,9 @@ void *keyboard_event(void *arg){
             case 'd':
                 p_data->move = PM_RIGHT;
                 move = true;
+                break;
+            case 'c':
+                p_data->coins_brought += 100;
                 break;
             default:
                 break;
