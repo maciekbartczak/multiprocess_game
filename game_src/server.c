@@ -38,13 +38,18 @@ int main(void){
     game_data.player_remote[1]->in_game = false;
     game_data.round = 0;
     game_data.campsite = get_empty_tile();
-    map[game_data.campsite.y][game_data.campsite.x] = MAP_RESERVED;
+    map[game_data.campsite.y][game_data.campsite.x] = MAP_CAMPSITE;
     for(int i=0;i<MAX_TREASURES;i++){
         game_data.treasures[i].type = TR_NONE;
     }
     game_data.player[0].pid = getpid();
     game_data.player[0].server_pid = game_data.player[0].pid;
-
+    const char treasures[] = "ctT";
+    const int amounts[] = {1,10,50};
+    for(int i=0;i<10;i++){
+        int t = rand()%3;
+        add_treasure(treasures[t],amounts[t]);
+    }
     sem_init(&game_data.player_remote[1]->join_request,1,0);
     sem_init(&game_data.player_remote[1]->join_reply,1,0);
     sem_init(&game_data.player_remote[1]->leave_request,1,0);
@@ -139,20 +144,23 @@ void *print_map(__attribute__((unused)) void *arg) {
                         mvprintw(i, j,"%c",map[i][j]);
                         attroff(COLOR_PAIR(EMPTY_PAIR));
                         break;
+                    case MAP_TR_COIN:
+                    case MAP_TR_TREASURE:
+                    case MAP_TR_TREASURE_LARGE:
+                    case MAP_TR_PLAYER:
+                        attron(COLOR_PAIR(TREASURE_PAIR));
+                        mvprintw(i,j,"%c",map[i][j]);
+                        attroff(COLOR_PAIR(TREASURE_PAIR));
+                        break;
+                    case MAP_CAMPSITE:
+                        attron(COLOR_PAIR(CAMPSITE_PAIR));
+                        mvprintw(i,j,"%c",map[i][j]);
+                        attroff(COLOR_PAIR(CAMPSITE_PAIR));
+                        break;
                     default:
                         break;
                 } 
             }
-        }
-        
-        for(int i=0;i<MAX_TREASURES;i++){
-            if(game_data.treasures[i].type != TR_NONE){
-                attron(COLOR_PAIR(TREASURE_PAIR));
-                mvprintw(game_data.treasures[i].position.y,game_data.treasures[i].position.x,
-                "%c",game_data.treasures[i].type);
-                attroff(COLOR_PAIR(TREASURE_PAIR));
-            }
-           
         }
 
         for(int i=0;i<2;i++){
@@ -163,10 +171,6 @@ void *print_map(__attribute__((unused)) void *arg) {
             }   
             
         }
-        
-        attron(COLOR_PAIR(CAMPSITE_PAIR));
-        mvprintw(game_data.campsite.y,game_data.campsite.x,"A");
-        attroff(COLOR_PAIR(CAMPSITE_PAIR));
 
         mvprintw(0,MAP_COLUMNS + 2,"Server PID: %d",game_data.player[0].server_pid);
         mvprintw(1,MAP_COLUMNS + 4,"Campsite X\\Y %d\\%d",game_data.campsite.x,game_data.campsite.y);
@@ -186,7 +190,11 @@ void *print_map(__attribute__((unused)) void *arg) {
                 mvprintw(8,MAP_COLUMNS + 4 + 11 +(i * 9),"%d\\%d",
                          game_data.player[i].position.x, game_data.player[i].position.y);
                 mvprintw(9,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player[i].deaths);
-                mvprintw(12,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player[i].coins_carried);
+                if(game_data.player[i].coins_carried == 0){
+                     mvprintw(12,MAP_COLUMNS + 4 + 11 +(i * 9),"%d   ",game_data.player[i].coins_carried);
+                }else{
+                    mvprintw(12,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player[i].coins_carried);
+                }
                 mvprintw(13,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player[i].coins_brought);
             }else{
                 mvprintw(6,MAP_COLUMNS + 4 + 11 +(i * 9),"-      ");
@@ -299,6 +307,7 @@ void *keyboard_event(__attribute__((unused)) void *arg){
 }
 
 
+
 void add_treasure(int k,unsigned int amount){
     int i = 0;
     bool found = false;
@@ -312,7 +321,19 @@ void add_treasure(int k,unsigned int amount){
         game_data.treasures[i].coins = amount;
         game_data.treasures[i].position = get_empty_tile();
         game_data.treasures[i].type = k;
-        map[game_data.treasures[i].position.y][game_data.treasures[i].position.x] = MAP_RESERVED;
+        char tr_type;
+        switch(k){
+            case TR_COIN:
+                tr_type = MAP_TR_COIN;
+                break;
+            case TR_TREASURE:
+                tr_type = MAP_TR_TREASURE;
+                break;
+            case TR_TREASURE_LARGE:
+                tr_type = MAP_TR_TREASURE_LARGE;
+                break;
+        }
+        map[game_data.treasures[i].position.y][game_data.treasures[i].position.x] = tr_type;
     }
     
 }
@@ -351,8 +372,8 @@ void *player_leave(void *arg){
         pthread_mutex_lock(&game_data.mutex);
         if(game_data.player[1].in_game){
             game_data.player[1].in_game = false;
-            map[game_data.player[1].position.y][game_data.player[1].position.x] = MAP_EMPTY;
             game_data.player_remote[1]->in_game = false;
+            map[game_data.player[1].position.y][game_data.player[1].position.x] = MAP_EMPTY;
         }
         sem_post(&game_data.player_remote[1]->leave_reply);
         pthread_mutex_unlock(&game_data.mutex);
@@ -361,14 +382,19 @@ void *player_leave(void *arg){
 
 void *advance_round(void *arg){
     while(1){
+        if(kill(game_data.player_remote[1]->pid,0) != 0){
+            sem_post(&game_data.player_remote[1]->leave_request);
+        }
         for(int i=0;i<2;i++){
             if(game_data.player[i].in_game){
                 if(game_data.player[i].slowed){ //skip a turn
                     game_data.player[i].slowed = false;
                     continue;
                 }
+                point pos = game_data.player[i].position;
+                point pos_orginal = pos;
+                bool valid = false;
                 if(sem_trywait(&game_data.player_remote[i]->move_request) == 0){
-                    point pos = game_data.player[i].position;
                     switch(game_data.player_remote[i]->move){
                         case PM_UP:
                             pos.y--;
@@ -384,6 +410,7 @@ void *advance_round(void *arg){
                             break;     
                     }
                     if(map[pos.y][pos.x] != MAP_WALL){
+                        valid = true;
                         game_data.player[i].position = pos;
                     }
                     if(map[pos.y][pos.x] == MAP_BUSH){
@@ -403,18 +430,33 @@ void *advance_round(void *arg){
                             break;
                         }
                     }
-                    sem_post(&game_data.player_remote[i]->move_reply);
                 }
+                if(!valid){
+                    pos = pos_orginal;
+                }
+                if(i==1){
+                    game_data.player_remote[i]->position = game_data.player[i].position;
+                    game_data.player_remote[i]->deaths = game_data.player[i].deaths;
+                    game_data.player_remote[i]->coins_carried = game_data.player[i].coins_carried;
+                    game_data.player_remote[i]->coins_brought = game_data.player[i].coins_brought;
+                    game_data.player_remote[i]->round = game_data.round;
+                    for(int k=0;k<MAP_ROWS;k++){
+                        for(int j=0;j<MAP_COLUMNS;j++){
+                            game_data.player_remote[i]->map[k][j] = MAP_NONE;
+                        }
+                    }
+                    for(int k=pos.y-PLAYER_SIGHT;k<pos.y+PLAYER_SIGHT;k++){
+                        for(int j=pos.x-PLAYER_SIGHT;j<pos.x+PLAYER_SIGHT;j++){
+                            if(k < 0 || j < 0 || k > MAP_ROWS || j > MAP_COLUMNS){
+                                continue;
+                            };
+                            game_data.player_remote[i]->map[k][j] = map[k][j];
+                        }
+                    }
+                }
+                sem_post(&game_data.player_remote[i]->move_reply);
             }
-            if(i==1){
-                game_data.player_remote[i]->position = game_data.player[i].position;
-                game_data.player_remote[i]->deaths = game_data.player[i].deaths;
-                game_data.player_remote[i]->coins_carried = game_data.player[i].coins_carried;
-                game_data.player_remote[i]->coins_brought = game_data.player[i].coins_brought;
-            }
-            
         }
-        
         usleep(250 * MS);
         game_data.round++;
         sem_post(&game_data.round_up);
