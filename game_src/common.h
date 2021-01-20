@@ -34,6 +34,7 @@ enum map_tiles{
     MAP_TR_TREASURE = 't',
     MAP_TR_TREASURE_LARGE = 'T',
     MAP_TR_PLAYER = 'D',
+    MAP_BEAST = '*',
     MAP_NONE
 };
 
@@ -63,3 +64,9 @@ struct player_t{
     bool slowed;
     char map[MAP_ROWS][MAP_COLUMNS];
 };
+
+struct lobby_t{
+    int slot[4];
+    sem_t join_request;
+    sem_t join_reply;
+}

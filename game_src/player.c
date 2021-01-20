@@ -6,6 +6,7 @@
 
 int max_x,max_y;
 struct player_t *p_data;
+point campsite = {-1,-1};
 
 int main(void){
     initscr();
@@ -91,7 +92,14 @@ void *print_map(void *arg){
                     case MAP_CAMPSITE:
                         attron(COLOR_PAIR(CAMPSITE_PAIR));
                         mvprintw(i,j,"%c",p_data->map[i][j]);
+                        campsite.y = i;
+                        campsite.x = j;
                         attroff(COLOR_PAIR(CAMPSITE_PAIR));
+                        break;
+                    case MAP_BEAST:
+                        attron(COLOR_PAIR(BEAST_PAIR));
+                        mvprintw(i,j,"%c",p_data->map[i][j]);
+                        attroff(COLOR_PAIR(BEAST_PAIR));
                         break;
                     case MAP_NONE:
                         attron(COLOR_PAIR(NONE_PAIR));
@@ -99,6 +107,11 @@ void *print_map(void *arg){
                         attroff(COLOR_PAIR(NONE_PAIR));
                     default:
                         break;
+                }
+                if(p_data->map[i][j] >= 1 && p_data->map[i][j] <=4){
+                        attron(COLOR_PAIR(PLAYER_PAIR));
+                        mvprintw(i,j,"%d",p_data->map[i][j]);
+                        attroff(COLOR_PAIR(PLAYER_PAIR));
                 } 
             }
         }
@@ -107,6 +120,12 @@ void *print_map(void *arg){
         mvprintw(p_data->position.y,p_data->position.x,"%d",2);
         attroff(COLOR_PAIR(PLAYER_PAIR));
 
+        mvprintw(0,MAP_COLUMNS + 2,"Server PID: %d",p_data->server_pid);
+        if(campsite.x !=-1 && campsite.y !=-1){
+            mvprintw(1,MAP_COLUMNS + 4,"Campsite: %d\\%d",campsite.x,campsite.y);
+        }else{
+            mvprintw(1,MAP_COLUMNS + 4,"Campsite: -\\-");
+        }
         mvprintw(0,MAP_COLUMNS + 2,"Server PID: %d",p_data->server_pid);
         mvprintw(2,MAP_COLUMNS + 4,"Round number: %d",p_data->round);
         mvprintw(5,MAP_COLUMNS + 2,"Parameter:   Player2");

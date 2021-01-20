@@ -7,8 +7,8 @@
 #include <stdlib.h>
 
 char map[MAP_ROWS][MAP_COLUMNS];
+char map_clean[MAP_ROWS][MAP_COLUMNS];
 struct game_data_t game_data;
-
 
 int main(void){
     srand(time(NULL));
@@ -20,11 +20,15 @@ int main(void){
     if(!load_map("_map.txt")){
         return 1;
     }
-    system("rm /dev/shm/player");
+    for(int i=0;i<MAP_ROWS;i++){
+        for(int j=0;j<MAP_COLUMNS;j++){
+            map_clean[i][j] = map[i][j];
+        }
+    }
     int player2_fd = shm_open("player",O_CREAT | O_EXCL | O_RDWR,0666);
     if(player2_fd == -1){
-        perror("shm_open");
-        return 1;
+        system("rm /dev/shm/player");
+        player2_fd = shm_open("player",O_CREAT | O_EXCL | O_RDWR,0666);
     }
     ftruncate(player2_fd,sizeof(struct player_t));
 
@@ -59,13 +63,16 @@ int main(void){
     sem_init(&game_data.player_remote[0]->move_request,0,0);
     sem_init(&game_data.player_remote[0]->move_reply,0,0);
     sem_init(&game_data.round_up,0,0);
+    sem_init(&game_data.beast_move_request,0,0);
+    sem_init(&game_data.beast_move_reply,0,0);
 
-    pthread_t th_map,th_keyboard,th_join,th_leave,th_round;
+    pthread_t th_map,th_keyboard,th_join,th_leave,th_round,th_beast;
     pthread_create(&th_map,NULL,print_map,NULL);
     pthread_create(&th_keyboard,NULL,keyboard_event,NULL);
     pthread_create(&th_join,NULL,player_join,NULL);
     pthread_create(&th_leave,NULL,player_leave,NULL);
     pthread_create(&th_round,NULL,advance_round,NULL);
+    pthread_create(&th_beast,NULL,beast_move,NULL);
 
     pthread_join(th_keyboard,NULL);
 
@@ -169,7 +176,14 @@ void *print_map(__attribute__((unused)) void *arg) {
                 mvprintw(game_data.player[i].position.y,game_data.player[i].position.x,"%d",i+1);
                 attroff(COLOR_PAIR(PLAYER_PAIR));
             }   
-            
+        }
+
+        for(int i=0;i<MAX_BEAST;i++){
+            if(game_data.beast[i].in_game){
+                attron(COLOR_PAIR(BEAST_PAIR));
+                mvprintw(game_data.beast[i].position.y,game_data.beast[i].position.x,"*");
+                attroff(COLOR_PAIR(BEAST_PAIR));
+            }
         }
 
         mvprintw(0,MAP_COLUMNS + 2,"Server PID: %d",game_data.player[0].server_pid);
@@ -187,7 +201,7 @@ void *print_map(__attribute__((unused)) void *arg) {
             if(game_data.player[i].in_game){
                 mvprintw(6,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player_remote[i]->pid);
                 mvprintw(7,MAP_COLUMNS + 4 + 11 +(i * 9),"HUMAN");
-                mvprintw(8,MAP_COLUMNS + 4 + 11 +(i * 9),"%d\\%d",
+                mvprintw(8,MAP_COLUMNS + 4 + 11 +(i * 9),"%02d\\%02d",
                          game_data.player[i].position.x, game_data.player[i].position.y);
                 mvprintw(9,MAP_COLUMNS + 4 + 11 +(i * 9),"%d",game_data.player[i].deaths);
                 if(game_data.player[i].coins_carried == 0){
@@ -256,6 +270,14 @@ point get_empty_tile(){
                     }
             }
         }
+        for(int i=0;i<MAX_BEAST;i++){
+            if(game_data.beast[i].in_game){
+                if(p.x == game_data.beast[i].position.x &&
+                   p.y == game_data.beast[i].position.y){
+                       valid = false;
+                   }
+            }
+        }
         if(valid){
             break;
         }
@@ -277,6 +299,9 @@ void *keyboard_event(__attribute__((unused)) void *arg){
                 break;
             case 'T':
                 add_treasure(k,50);
+                break;
+            case 'b':
+                add_beast();
                 break;
             case 'q':
                 return NULL;
@@ -424,7 +449,7 @@ void *advance_round(void *arg){
                         if(game_data.treasures[j].type != TR_NONE &&
                         game_data.treasures[j].position.x == pos.x &&
                         game_data.treasures[j].position.y == pos.y){
-                            map[game_data.treasures[j].position.y][game_data.treasures[j].position.x] = MAP_EMPTY;
+                            map[game_data.treasures[j].position.y][game_data.treasures[j].position.x] = map_clean[game_data.treasures[j].position.y][game_data.treasures[j].position.x];
                             game_data.player[i].coins_carried += game_data.treasures[j].coins;
                             game_data.treasures[j].type = TR_NONE;
                             break;
@@ -445,20 +470,224 @@ void *advance_round(void *arg){
                             game_data.player_remote[i]->map[k][j] = MAP_NONE;
                         }
                     }
-                    for(int k=pos.y-PLAYER_SIGHT;k<pos.y+PLAYER_SIGHT;k++){
-                        for(int j=pos.x-PLAYER_SIGHT;j<pos.x+PLAYER_SIGHT;j++){
+                    for(int k=pos.y-PLAYER_SIGHT;k<=pos.y+PLAYER_SIGHT;k++){
+                        for(int j=pos.x-PLAYER_SIGHT;j<=pos.x+PLAYER_SIGHT;j++){
                             if(k < 0 || j < 0 || k > MAP_ROWS || j > MAP_COLUMNS){
                                 continue;
                             };
                             game_data.player_remote[i]->map[k][j] = map[k][j];
+                            for(int player=0;player<2;player++){
+                                if(i != player && game_data.player[player].in_game){
+                                    if(game_data.player[player].position.y == k && 
+                                       game_data.player[player].position.x == j){
+                                            game_data.player_remote[i]->map[k][j] = player+1;
+                                       }
+                                }
+                            }
+                            for(int beast=0;beast<MAX_BEAST;beast++){
+                                if(game_data.beast[beast].in_game){
+                                    if(game_data.beast[beast].position.y == k && 
+                                       game_data.beast[beast].position.x == j){
+                                            game_data.player_remote[i]->map[k][j] = MAP_BEAST;
+                                       }
+                                }
+                            }
                         }
                     }
                 }
                 sem_post(&game_data.player_remote[i]->move_reply);
             }
         }
+        sem_post(&game_data.beast_move_request);
+        sem_wait(&game_data.beast_move_reply);
+        for(int player1=0;player1<2;player1++){
+            for(int player2=0;player2<2;player2++){
+                if(player1 != player2 && game_data.player[player1].in_game &&
+                   game_data.player[player2].in_game){
+                       if(game_data.player[player1].position.x == game_data.player[player2].position.x &&
+                          game_data.player[player1].position.y == game_data.player[player2].position.y){
+                                if(game_data.player[player1].coins_carried > 0){
+                                    add_treasure_player(game_data.player[player1].position,game_data.player[player1].coins_carried);
+                                }
+                                game_data.player[player1].position = game_data.player[player1].spawn;
+                                game_data.player[player1].slowed = false;
+                                game_data.player[player1].deaths++;
+                                game_data.player[player1].coins_carried = 0;
+                          }
+                }
+            }
+        }
+        for(int player1=0;player1<2;player1++){
+            for(int beast=0;beast<MAX_BEAST;beast++){
+                if(game_data.player[player1].in_game && game_data.beast[beast].in_game){
+                    if(game_data.player[player1].position.x == game_data.beast[beast].position.x &&
+                       game_data.player[player1].position.y == game_data.beast[beast].position.y){
+                            if(game_data.player[player1].coins_carried > 0){
+                                add_treasure_player(game_data.player[player1].position,game_data.player[player1].coins_carried);
+                            }
+                            game_data.player[player1].position = game_data.player[player1].spawn;
+                            game_data.player[player1].slowed = false;
+                            game_data.player[player1].deaths++;
+                            game_data.player[player1].coins_carried = 0;
+                    }
+                }
+            }
+        }
         usleep(250 * MS);
         game_data.round++;
         sem_post(&game_data.round_up);
     }
+}
+
+
+void add_beast(){
+    for(int i=0;i<MAX_BEAST;i++){
+        if(game_data.beast[i].in_game == false){
+            game_data.beast[i].in_game = true;
+            game_data.beast[i].position = get_empty_tile();
+            return;
+        }
+    }
+}
+
+void *beast_move(void *arg){
+    while(1){
+        sem_wait(&game_data.beast_move_request);
+        for(int i=0;i<MAX_BEAST;i++){
+            bool moved = false;
+            if(game_data.beast[i].in_game){
+                point beast_pos = game_data.beast[i].position;
+                for(int j=0;j<2;j++){
+                    if(game_data.player[j].in_game){
+                        if(player_in_sight(beast_pos.x,beast_pos.y,
+                                    game_data.player[j].position.x,game_data.player[j].position.y)){  
+                                            if(beast_pos.y > game_data.player[j].position.y){
+                                                beast_pos.y--;
+                                                if(map[beast_pos.y][beast_pos.x] != MAP_WALL){
+                                                    game_data.beast[i].position = beast_pos;
+                                                    moved = true;
+                                                }
+                                            }else if(beast_pos.y < game_data.player[j].position.y){
+                                                beast_pos.y++;
+                                                if(map[beast_pos.y][beast_pos.x] != MAP_WALL){
+                                                    game_data.beast[i].position = beast_pos;
+                                                    moved = true;
+                                                }
+                                            }
+                                            if(!moved){
+                                            if(beast_pos.x > game_data.player[j].position.x){
+                                                beast_pos.x--;
+                                                if(map[beast_pos.y][beast_pos.x] != MAP_WALL){
+                                                    game_data.beast[i].position = beast_pos;
+                                                    moved = true;
+                                                }
+                                            }else if(beast_pos.x < game_data.player[j].position.x){
+                                                beast_pos.x++;
+                                                if(map[beast_pos.y][beast_pos.x] != MAP_WALL){
+                                                    game_data.beast[i].position = beast_pos;
+                                                    moved = true;
+                                                }
+                                            }
+                                        }
+                                        
+                                       
+                                    }
+                                    if(moved){
+                                        break;
+                                    }
+                    }
+                }
+            }
+        }
+        sem_post(&game_data.beast_move_reply);
+    }
+}
+
+bool player_in_sight(int x0, int y0, int x1, int y1){
+    if (abs(y1 - y0) < abs(x1 - x0)){
+        if (x0 > x1){
+            return line_low(x1, y1, x0, y0);
+        }
+        else{
+            return line_low(x0, y0, x1, y1);
+        }
+    }else{
+        if(y0 > y1){
+            return line_high(x1,y1,x0,y0);
+        }else{
+            return line_high(x0,y0,x1,y1);
+        }
+    }
+}
+
+bool line_low(int x0, int y0, int x1, int y1){
+    int dx,dy,yi,d,y,x;
+    dx = x1 - x0;
+    dy = y1 - y0;
+    yi = 1;
+    if(dy < 0){
+        yi *= -1;
+        dy *= -1;
+    }
+    d = (2 * dy) - dx;
+    y = y0;
+    x = x0;
+    while(x<x1){
+        if(map[y][x] == MAP_WALL){
+            return false;
+        }
+        if(d>0){
+            y += yi;
+            d += (2 * (dy - dx));
+        }else{
+            d += 2*dy;
+        }
+        x++;
+    }
+    return true;
+}
+
+bool line_high(int x0, int y0, int x1, int y1){
+    int dx,dy,xi,d,y,x;
+    dx = x1 - x0;
+    dy = y1 - y0;
+    xi = 1;
+    if(dx < 0){
+        xi *= -1;
+        dx *= -1;
+    }
+    d = (2 * dx) - dy;
+    y = y0;
+    x = x0;
+    while(y<y1){
+        if(map[y][x] == MAP_WALL){
+            return false;
+        }
+        if(d>0){
+            x += xi;
+            d += (2 * (dx - dy));
+        }else{
+            d += 2*dx;
+        }
+        y++;
+    }
+    return true;
+}
+
+void add_treasure_player(point pos, unsigned int amount){
+    int i = 0;
+    bool found = false;
+    for(;i<MAX_TREASURES;i++){
+        if(game_data.treasures[i].type == TR_NONE){
+            found = true;
+            break;
+        }
+    }
+    if(found){
+        game_data.treasures[i].coins = amount;
+        game_data.treasures[i].position = pos;
+        game_data.treasures[i].type = TR_PLAYER;
+        map[game_data.treasures[i].position.y][game_data.treasures[i].position.x] = TR_PLAYER;
+    }
+    
 }
