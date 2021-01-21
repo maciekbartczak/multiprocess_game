@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 
+
 int max_x,max_y;
 struct player_t *p_data;
 struct lobby_t *lobby;
@@ -177,7 +178,7 @@ void *print_map(void *arg){
         mvprintw(18,MAP_COLUMNS + 10,"- bush");
         mvprintw(19,MAP_COLUMNS + 10,"- beast");
         mvprintw(20,MAP_COLUMNS + 10,"- one coin");
-        mvprintw(21,MAP_COLUMNS + 10,"- tresure (10 coins)");
+        mvprintw(21,MAP_COLUMNS + 10,"- treasure (10 coins)");
         mvprintw(22,MAP_COLUMNS + 10,"- large treasure (50 coins)");
         mvprintw(23,MAP_COLUMNS + 10,"- dropped treasure");
         mvprintw(24,MAP_COLUMNS + 10,"- campsite");

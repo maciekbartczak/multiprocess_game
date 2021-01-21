@@ -1,10 +1,11 @@
 #include "server.h"
 #include <stdio.h>
-#include <stdbool.h>
 #include <ncurses.h>
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <signal.h>
 
 char map[MAP_ROWS][MAP_COLUMNS];
 char map_clean[MAP_ROWS][MAP_COLUMNS];
@@ -28,7 +29,7 @@ int main(void){
             map_clean[i][j] = map[i][j];
         }
     }
-    int lobby_fd = shm_open("lobby",O_CREAT | O_EXCL | O_RDWR,0666);;
+    int lobby_fd = shm_open("lobby",O_CREAT | O_EXCL | O_RDWR,0666);
     int player1_fd = shm_open("player1",O_CREAT | O_EXCL | O_RDWR,0666);
     int player2_fd = shm_open("player2",O_CREAT | O_EXCL | O_RDWR,0666);
     int player3_fd = shm_open("player3",O_CREAT | O_EXCL | O_RDWR,0666);
@@ -62,7 +63,7 @@ int main(void){
     game_data.lobby->server_pid = game_data.pid;
 
     const char treasures[] = "ctT";
-    const int amounts[] = {1,10,50};
+    const unsigned int amounts[] = {1,10,50};
     for(int i=0;i<10;i++){
         int t = rand()%3;
         add_treasure(treasures[t],amounts[t]);
@@ -272,13 +273,12 @@ void *print_map(__attribute__((unused)) void *arg) {
         mvprintw(18,MAP_COLUMNS + 10,"- bush");
         mvprintw(19,MAP_COLUMNS + 10,"- beast");
         mvprintw(20,MAP_COLUMNS + 10,"- one coin");
-        mvprintw(21,MAP_COLUMNS + 10,"- tresure (10 coins)");
+        mvprintw(21,MAP_COLUMNS + 10,"- treasure (10 coins)");
         mvprintw(22,MAP_COLUMNS + 10,"- large treasure (50 coins)");
         mvprintw(23,MAP_COLUMNS + 10,"- dropped treasure");
         mvprintw(24,MAP_COLUMNS + 10,"- campsite");
         refresh();
     }
-    return NULL;
 }
 
 
@@ -317,7 +317,6 @@ point get_empty_tile(){
 void *keyboard_event(__attribute__((unused)) void *arg){
     int k;
     while(1){
-        bool move = false;
         k = getchar();
         switch(k){
             case 'c':
@@ -366,6 +365,8 @@ void add_treasure(int k,unsigned int amount){
             case TR_TREASURE_LARGE:
                 tr_type = MAP_TR_TREASURE_LARGE;
                 break;
+            default:
+                tr_type = TR_NONE;
         }
         map[game_data.treasures[i].position.y][game_data.treasures[i].position.x] = tr_type;
     }
@@ -440,7 +441,7 @@ void *advance_round(void *arg){
                     continue;
                 }
                 point pos = game_data.player[i].position;
-                point pos_orginal = pos;
+                point pos_original = pos;
                 bool valid = false;
                 if(sem_trywait(&game_data.player_remote[i]->move_request) == 0){
                     switch(game_data.player_remote[i]->move){
@@ -480,7 +481,7 @@ void *advance_round(void *arg){
                     }
                 }
                 if(!valid){
-                    pos = pos_orginal;
+                    pos = pos_original;
                 }
                 game_data.player_remote[i]->position = game_data.player[i].position;
                 game_data.player_remote[i]->deaths = game_data.player[i].deaths;
@@ -496,7 +497,7 @@ void *advance_round(void *arg){
                     for(int j=pos.x-PLAYER_SIGHT;j<=pos.x+PLAYER_SIGHT;j++){
                         if(k < 0 || j < 0 || k >= MAP_ROWS || j >= MAP_COLUMNS){
                             continue;
-                        };
+                        }
                         game_data.player_remote[i]->map[k][j] = map[k][j];
                         for(int player=0;player<4;player++){
                             if(i != player && game_data.player[player].in_game){
@@ -581,7 +582,7 @@ void add_beast(){
 
 void *beast_move(void *arg){
     pthread_mutex_lock(&game_data.mutex);
-    unsigned int i = *(int *)arg;
+    unsigned int i = *(unsigned int *)arg;
     pthread_mutex_unlock(&game_data.mutex);
     while(1){
         sem_wait(&game_data.beast[i].beast_move_request);
