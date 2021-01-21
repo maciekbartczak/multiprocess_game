@@ -6,7 +6,9 @@
 
 int max_x,max_y;
 struct player_t *p_data;
+struct lobby_t *lobby;
 point campsite = {-1,-1};
+int slot;
 
 int main(void){
     initscr();
@@ -14,29 +16,37 @@ int main(void){
     noecho();
     curs_set(0);
     getmaxyx(stdscr,max_y,max_x);
-
-    int my_fd = shm_open("player",O_RDWR,0666);
-    if(my_fd == -1){
+    int lobby_fd = shm_open("lobby",O_RDWR,0666);
+    if(lobby_fd == -1){
         mvprintw(max_y/2,max_x/2 - 9,"SERVER NOT RUNNING");
         refresh();
         getchar();
         return 0;
     }
-    p_data = mmap(NULL,sizeof(struct player_t),PROT_READ | PROT_WRITE, MAP_SHARED,my_fd,0);
-            
-    if(!p_data->in_game){
-        pid_t my_pid = getpid();
-        sem_post(&p_data->join_request);
-        sem_wait(&p_data->join_reply);
-        p_data->pid = my_pid;
-    }else{
+    lobby = mmap(NULL,sizeof(struct player_t),PROT_READ | PROT_WRITE, MAP_SHARED,lobby_fd,0);
+    sem_post(&lobby->join_request);
+    sem_wait(&lobby->join_reply);
+    slot = -1;
+    for(int i=0;i<4;i++){
+        if(lobby->slot[i]==-1){
+            slot = i;
+            break;
+        }
+    }
+    if(slot == -1){
         mvprintw(max_y/2,max_x/2 - 10,"SERVER IS FULL");
         refresh();
         usleep(5000 * MS);
-        munmap(&p_data,sizeof(struct player_t));
-        close(my_fd);
+        munmap(&lobby,sizeof(struct lobby_t));
+        close(lobby_fd);
         return 0;
     }
+    lobby->slot[slot] = 1;
+    char buffer[20];
+    sprintf(buffer,"player%d",slot+1);
+    int my_fd = shm_open(buffer,O_RDWR,0666);
+    p_data = mmap(NULL,sizeof(struct player_t),PROT_READ | PROT_WRITE, MAP_SHARED,my_fd,0);
+    p_data->pid = getpid();
     refresh();
 
     pthread_t th_keyboard,th_map;
@@ -117,18 +127,17 @@ void *print_map(void *arg){
         }
 
         attron(COLOR_PAIR(PLAYER_PAIR));
-        mvprintw(p_data->position.y,p_data->position.x,"%d",2);
+        mvprintw(p_data->position.y,p_data->position.x,"%d",slot+1);
         attroff(COLOR_PAIR(PLAYER_PAIR));
 
-        mvprintw(0,MAP_COLUMNS + 2,"Server PID: %d",p_data->server_pid);
+        mvprintw(0,MAP_COLUMNS + 2,"Server PID: %d",lobby->server_pid);
         if(campsite.x !=-1 && campsite.y !=-1){
             mvprintw(1,MAP_COLUMNS + 4,"Campsite: %d\\%d",campsite.x,campsite.y);
         }else{
             mvprintw(1,MAP_COLUMNS + 4,"Campsite: -\\-");
         }
-        mvprintw(0,MAP_COLUMNS + 2,"Server PID: %d",p_data->server_pid);
         mvprintw(2,MAP_COLUMNS + 4,"Round number: %d",p_data->round);
-        mvprintw(5,MAP_COLUMNS + 2,"Parameter:   Player2");
+        mvprintw(5,MAP_COLUMNS + 2,"Parameter:   Player%d",slot+1);
         mvprintw(6,MAP_COLUMNS + 4,"PID");
         mvprintw(7,MAP_COLUMNS + 4,"X\\Y");
         mvprintw(8,MAP_COLUMNS + 4,"Deaths");
@@ -136,9 +145,9 @@ void *print_map(void *arg){
         mvprintw(12,MAP_COLUMNS + 4,"Carried");
         mvprintw(13,MAP_COLUMNS + 4,"Brought");
         mvprintw(6,MAP_COLUMNS + 4 + 11 ,"%d",p_data->pid);
-        mvprintw(7,MAP_COLUMNS + 4 + 11 ,"%d\\%d",
+        mvprintw(7,MAP_COLUMNS + 4 + 11 ,"%02d\\%02d",
                  p_data->position.x, p_data->position.y);
-        mvprintw(9,MAP_COLUMNS + 4 + 11 ,"%d",p_data->deaths);
+        mvprintw(8,MAP_COLUMNS + 4 + 11 ,"%d",p_data->deaths);
         if(p_data->coins_carried == 0){
              mvprintw(12,MAP_COLUMNS + 4 + 11,"%d   ",p_data->coins_carried);
         }else{
@@ -148,7 +157,7 @@ void *print_map(void *arg){
 
         mvprintw(15,MAP_COLUMNS + 2,"Legend: ");
         attron(COLOR_PAIR(PLAYER_PAIR));
-        mvprintw(16,MAP_COLUMNS + 4,"12");
+        mvprintw(16,MAP_COLUMNS + 4,"1234");
         attron(COLOR_PAIR(WALL_PAIR));
         mvprintw(17,MAP_COLUMNS + 4," ");
         attron(COLOR_PAIR(BUSH_PAIR));
@@ -184,8 +193,9 @@ void *keyboard_event(void *arg){
         k = getchar();
         switch(k){
             case 'q':
-                sem_post(&p_data->leave_request);
-                sem_wait(&p_data->leave_reply);
+                lobby->slot[slot] = -1;
+                sem_post(&lobby->leave_request);
+                sem_wait(&lobby->leave_reply);
                 return NULL;
             case 'w':
                 p_data->move = PM_UP;
@@ -202,9 +212,6 @@ void *keyboard_event(void *arg){
             case 'd':
                 p_data->move = PM_RIGHT;
                 move = true;
-                break;
-            case 'c':
-                p_data->coins_brought += 100;
                 break;
             default:
                 break;

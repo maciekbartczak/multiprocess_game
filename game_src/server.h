@@ -9,7 +9,6 @@
 #define MAX_TREASURES 50
 #define MAX_BEAST 10
 
-
 enum treasure_type{
     TR_NONE,
     TR_COIN = 'c',
@@ -17,7 +16,6 @@ enum treasure_type{
     TR_TREASURE_LARGE = 'T',
     TR_PLAYER = 'D'
 };
-
 
 struct treasure_t{
     point position;
@@ -27,6 +25,8 @@ struct treasure_t{
 
 struct beast_t{
     point position;
+    sem_t beast_move_request;
+    sem_t beast_move_reply;
     bool in_game;
 };
 
@@ -36,12 +36,11 @@ struct game_data_t{
     unsigned int round;
     struct treasure_t treasures[MAX_TREASURES];
     struct player_t *player;
-    struct player_t *player_remote[2];
+    struct player_t *player_remote[4];
+    struct lobby_t *lobby;
     struct beast_t beast[MAX_BEAST];
     sem_t round_up;
-    sem_t beast_move_request;
-    sem_t beast_move_reply;
-    
+    pid_t pid;
 };
 
 bool load_map(const char *filename);

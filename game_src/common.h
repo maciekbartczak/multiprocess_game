@@ -52,12 +52,7 @@ struct player_t{
     unsigned int coins_carried;
     unsigned int coins_brought;
     pid_t pid;
-    pid_t server_pid;
     bool in_game;
-    sem_t join_request;
-    sem_t join_reply;
-    sem_t leave_request;
-    sem_t leave_reply;
     enum player_move move;
     sem_t move_request;
     sem_t move_reply;
@@ -69,4 +64,7 @@ struct lobby_t{
     int slot[4];
     sem_t join_request;
     sem_t join_reply;
-}
+    sem_t leave_request;
+    sem_t leave_reply;
+    pid_t server_pid;
+};
