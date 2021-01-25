@@ -8,3 +8,5 @@ server: $(GAME_SRC)/server.c $(GAME_SRC)/server.h
 	gcc $(CFLAGS) $< -o $@ $(LINK_FLAGS)
 player: $(GAME_SRC)/player.c $(GAME_SRC)/player.h
 	gcc $(CFLAGS) $< -o $@ $(LINK_FLAGS)
+clean:
+	rm ./server ./player

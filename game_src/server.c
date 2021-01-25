@@ -30,10 +30,41 @@ int main(void){
         }
     }
     int lobby_fd = shm_open("lobby",O_CREAT | O_EXCL | O_RDWR,0666);
+    if(lobby_fd == -1){
+        perror("shm_open lobby");
+        return 1;
+    }
     int player1_fd = shm_open("player1",O_CREAT | O_EXCL | O_RDWR,0666);
+        if(player1_fd == -1){
+            shm_unlink("lobby");
+            perror("shm_open p1");
+            return 1;
+    }
     int player2_fd = shm_open("player2",O_CREAT | O_EXCL | O_RDWR,0666);
+    if(player2_fd == -1){
+            shm_unlink("lobby");
+            shm_unlink("player1");
+            perror("shm_open p2");
+            return 1;
+    }
     int player3_fd = shm_open("player3",O_CREAT | O_EXCL | O_RDWR,0666);
+    if(player3_fd == -1){
+            shm_unlink("lobby");
+            shm_unlink("player1");
+            shm_unlink("player2");
+            perror("shm_open p3");
+            return 1;
+    }
     int player4_fd = shm_open("player4",O_CREAT | O_EXCL | O_RDWR,0666);
+    if(player4_fd == -1){
+            shm_unlink("lobby");
+            shm_unlink("player1");
+            shm_unlink("player2");
+            shm_unlink("player3");
+            perror("shm_open p4");
+            return 1;
+    }
+
     ftruncate(lobby_fd,sizeof(struct lobby_t));
     ftruncate(player1_fd,sizeof(struct player_t));
     ftruncate(player2_fd,sizeof(struct player_t));
@@ -51,7 +82,7 @@ int main(void){
     game_data.player_remote[3] = mmap(NULL,sizeof(struct player_t),PROT_READ | PROT_WRITE, MAP_SHARED,player4_fd,0);
     game_data.lobby = mmap(NULL,sizeof(struct player_t),PROT_READ | PROT_WRITE, MAP_SHARED,lobby_fd,0);
     for(int i=0;i<4;i++){
-        game_data.lobby->slot[i] = 0;
+        game_data.lobby->slot[i] = SLOT_FREE;
     }
     game_data.round = 0;
     game_data.campsite = get_empty_tile();
@@ -329,9 +360,11 @@ void *keyboard_event(__attribute__((unused)) void *arg){
                 add_treasure(k,50);
                 break;
             case 'b':
+            case 'B':
                 add_beast();
                 break;
             case 'q':
+            case 'Q':
                 return NULL;
             default:
                 break;
@@ -383,7 +416,7 @@ void initialize_player(struct player_t *p){
     p->slowed = false;
 }
 
-void *player_join(void *arg){
+void *player_join(__attribute__((unused)) void *arg){
     while(1){
         sem_wait(&game_data.lobby->join_request);
         pthread_mutex_lock(&game_data.mutex);
@@ -397,7 +430,7 @@ void *player_join(void *arg){
                 game_data.player_remote[slot_free]->deaths = game_data.player[slot_free].deaths;
                 game_data.player_remote[slot_free]->coins_carried = game_data.player[slot_free].coins_carried;
                 game_data.player_remote[slot_free]->coins_brought = game_data.player[slot_free].coins_brought;
-                game_data.lobby->slot[slot_free] = -1;
+                game_data.lobby->slot[slot_free] = SLOT_REQ;
                 found = true;
             }
             if(found){
@@ -409,7 +442,7 @@ void *player_join(void *arg){
     }
 }
 
-void *player_leave(void *arg){
+void *player_leave(__attribute__((unused)) void *arg){
     while(1){
         sem_wait(&game_data.lobby->leave_request);
         pthread_mutex_lock(&game_data.mutex);
@@ -418,7 +451,7 @@ void *player_leave(void *arg){
             if(game_data.lobby->slot[slot] == -1){
                 if(game_data.player[slot].in_game){
                     game_data.player[slot].in_game = false;
-                    game_data.lobby->slot[slot] = 0;
+                    game_data.lobby->slot[slot] = SLOT_FREE;
                 }
                 break;
             }
@@ -428,7 +461,7 @@ void *player_leave(void *arg){
     }
 }
 
-void *advance_round(void *arg){
+void *advance_round(__attribute__((unused)) void *arg){
     while(1){
         
         for(int i=0;i<4;i++){
@@ -533,13 +566,18 @@ void *advance_round(void *arg){
                    game_data.player[player2].in_game){
                        if(game_data.player[player1].position.x == game_data.player[player2].position.x &&
                           game_data.player[player1].position.y == game_data.player[player2].position.y){
-                                if(game_data.player[player1].coins_carried > 0){
-                                    add_treasure_player(game_data.player[player1].position,game_data.player[player1].coins_carried);
+                                if(game_data.player[player1].coins_carried > 0 || game_data.player[player2].coins_carried >0){
+                                    add_treasure_player(game_data.player[player1].position,
+                                                        game_data.player[player1].coins_carried + game_data.player[player2].coins_carried);
                                 }
                                 game_data.player[player1].position = game_data.player[player1].spawn;
                                 game_data.player[player1].slowed = false;
                                 game_data.player[player1].deaths++;
                                 game_data.player[player1].coins_carried = 0;
+                                game_data.player[player2].position = game_data.player[player2].spawn;
+                                game_data.player[player2].slowed = false;
+                                game_data.player[player2].deaths++;
+                                game_data.player[player2].coins_carried = 0;
                           }
                 }
             }

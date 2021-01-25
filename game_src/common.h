@@ -38,6 +38,11 @@ enum map_tiles{
     MAP_NONE
 };
 
+enum slot_value{
+    SLOT_FREE,
+    SLOT_TAKEN,
+    SLOT_REQ
+};
 
 typedef struct point_t{
     int x;

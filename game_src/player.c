@@ -29,7 +29,7 @@ int main(void){
     sem_wait(&lobby->join_reply);
     slot = -1;
     for(int i=0;i<4;i++){
-        if(lobby->slot[i]==-1){
+        if(lobby->slot[i]==SLOT_REQ){
             slot = i;
             break;
         }
@@ -42,7 +42,7 @@ int main(void){
         close(lobby_fd);
         return 0;
     }
-    lobby->slot[slot] = 1;
+    lobby->slot[slot] = SLOT_TAKEN;
     char buffer[20];
     sprintf(buffer,"player%d",slot+1);
     int my_fd = shm_open(buffer,O_RDWR,0666);
@@ -62,7 +62,7 @@ int main(void){
     return 0;
 }
 
-void *print_map(void *arg){
+void *print_map(__attribute__((unused)) void *arg){
     start_color();
     init_pair(PLAYER_PAIR,COLOR_WHITE,COLOR_MAGENTA);
     init_pair(WALL_PAIR,COLOR_CYAN,COLOR_CYAN);
@@ -187,14 +187,14 @@ void *print_map(void *arg){
     }
 }
 
-void *keyboard_event(void *arg){
+void *keyboard_event(__attribute__((unused)) void *arg){
     int k;
     while(1){
         bool move = false;
         k = getchar();
         switch(k){
             case 'q':
-                lobby->slot[slot] = -1;
+                lobby->slot[slot] = SLOT_REQ;
                 sem_post(&lobby->leave_request);
                 sem_wait(&lobby->leave_reply);
                 return NULL;
